@@ -1,5 +1,5 @@
-const CACHE='neon-zigzag-v6';
-const ASSETS=['./','./index.html','./style.css?v=6','./script.js?v=6','./engine.js','./live-run.js','./ranking.js?v=6','./ranking-store.js','./score-sync.js','./firebase-config.js','./manifest.json','./icon.svg','./notoow-2d.png','./notoow-login.js'];
+const CACHE='neon-zigzag-v7';
+const ASSETS=['./','./index.html','./style.css?v=7','./script.js?v=7','./engine.js?v=7','./live-run.js?v=7','./ranking.js?v=7','./ranking-store.js?v=7','./score-sync.js?v=7','./firebase-config.js?v=7','./manifest.json','./icon.svg','./notoow-2d.png','./notoow-login.js'];
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting()));});
 self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key==='zigzag-v1'||key.startsWith('neon-zigzag-')&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim()));});
 self.addEventListener('fetch',event=>{const url=new URL(event.request.url);if(event.request.method!=='GET'||url.origin!==self.location.origin||!url.pathname.startsWith(new URL(self.registration.scope).pathname))return;event.respondWith(fetch(event.request).then(response=>{if(response.ok){const copy=response.clone();event.waitUntil(caches.open(CACHE).then(cache=>cache.put(event.request,copy)));}return response;}).catch(()=>caches.match(event.request).then(cached=>cached||Response.error())));});

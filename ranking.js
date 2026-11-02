@@ -1,6 +1,6 @@
-import {backend} from './firebase-config.js';
-import {rankingStore} from './ranking-store.js';
-import {LiveRun} from './live-run.js';
+import {backend} from './firebase-config.js?v=7';
+import {rankingStore} from './ranking-store.js?v=7';
+import {LiveRun} from './live-run.js?v=7';
 let connection,appCheck,player=null;
 const listeners=new Set();
 export const getPlayer=()=>player;

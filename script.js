@@ -1,8 +1,8 @@
-import {LiveRun} from './live-run.js';
-import {getPlayer,onPlayerChange,restoreAccount,signInAccount,signOutAccount,beginRun,submitScore,topScores,rankedRequest} from './ranking.js?v=6';
-import {ScoreSync} from './score-sync.js';
+import {LiveRun} from './live-run.js?v=7';
+import {getPlayer,onPlayerChange,restoreAccount,signInAccount,signOutAccount,beginRun,submitScore,topScores,rankedRequest} from './ranking.js?v=7';
+import {ScoreSync} from './score-sync.js?v=7';
 import {loginNotoow} from './notoow-login.js';
-import {Game,BEAT,seasonRandom} from './engine.js';
+import {Game,BEAT,seasonRandom} from './engine.js?v=7';
 const $=id=>document.getElementById(id),canvas=$('gameCanvas'),ctx=canvas.getContext('2d');
 let game=new Game(),mode='ready',previous=0,raf=0,scale=1,h=800,best=0,rankRun=null,identityHidden=false,accountLoading=true;
 let liveRun=null,lastCheckpoint=0,resumeQueued=false;
