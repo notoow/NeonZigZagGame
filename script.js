@@ -1,8 +1,9 @@
-import {hasRankedSession} from './ranking.js';
+import {getPlayer,onPlayerChange,restoreAccount,signInAccount,signOutAccount,beginRun,submitScore,topScores} from './ranking.js?v=5';
+import {ScoreSync} from './score-sync.js';
 import {loginNotoow} from './notoow-login.js';
 import {Game,BEAT,seasonRandom} from './engine.js';
 const $=id=>document.getElementById(id),canvas=$('gameCanvas'),ctx=canvas.getContext('2d');
-let game=new Game(),mode='ready',previous=0,raf=0,scale=1,h=800,best=0,rankRun=null,rankingPromise,rankedMode=false;
+let game=new Game(),mode='ready',previous=0,raf=0,scale=1,h=800,best=0,rankRun=null,identityHidden=false,accountLoading=true;
 let audio,soundOn=true,nextBeat=0,flash=0,judgment='';
 try{best=Number(localStorage.getItem('neon-v2-best'))||0;}catch{}
 $('best').textContent=best;
@@ -25,18 +26,51 @@ function music(){
 }
 function screens(active){document.querySelectorAll('.screen').forEach(el=>el.hidden=el.id!==active);}
 function status(text){$('input-status').textContent=text;}
-async function loadRanking(){if(!rankingPromise)rankingPromise=import('./ranking.js').catch(error=>{rankingPromise=null;throw error;});return rankingPromise;}
-async function start(ranked=false){
+let storage;try{storage=localStorage;identityHidden=storage.getItem('neon-hide-name')==='1';}catch{}
+const scoreSync=new ScoreSync({submit:submitScore,storage,onState:state=>{
+ $('rank-message').textContent=state==='saving'?'저장 중…':state==='saved'?'저장됨':'저장 실패';
+ $('retry-save').hidden=state!=='error';
+ $('quick-retry').disabled=state==='saving';
+ if(state==='saved'&&$('rank-dialog').open)showRanks();
+}});
+function renderAccount(){
+ const player=getPlayer();
+ $('account-name').textContent=player?(identityHidden?'••••••':player.name):(accountLoading?'연결 중…':'로그인');
+ $('account-name').disabled=accountLoading;
+ $('name-visibility').hidden=!player;$('name-visibility').setAttribute('aria-pressed',String(identityHidden));
+ $('name-visibility').setAttribute('aria-label',identityHidden?'이름 표시':'이름 숨기기');
+ $('name-visibility').classList.toggle('is-hidden',identityHidden);
+ $('ranked-btn').hidden=Boolean(player);$('start-btn').textContent='플레이';
+}
+onPlayerChange(renderAccount);
+let accountError=false;
+const accountReady=restoreAccount().then(async player=>{if(player)await scoreSync.flush(player.uid).catch(()=>{});return player;}).catch(()=>{accountError=true;return null;}).finally(()=>{accountLoading=false;renderAccount();});
+async function login(){
+ if(mode==='playing'||mode==='loading')return;
+ const token=loginNotoow();$('account-name').disabled=true;$('start-status').textContent='로그인 중…';
+ try{await signInAccount(await token);accountError=false;await scoreSync.flush(getPlayer().uid);$('start-status').textContent='';}
+ catch(error){$('start-status').textContent=error.message==='LOGIN_CANCELLED'?'':error.message==='POPUP_BLOCKED'?'팝업을 허용해 주세요.':'로그인 실패';}
+ finally{renderAccount();}
+}
+$('account-name').addEventListener('click',()=>{if(getPlayer())$('account-menu').hidden=!$('account-menu').hidden;else login();});
+$('name-visibility').addEventListener('click',()=>{identityHidden=!identityHidden;try{storage?.setItem('neon-hide-name',identityHidden?'1':'0');}catch{}renderAccount();if($('rank-dialog').open)showRanks();});
+$('sign-out').addEventListener('click',async()=>{if(mode==='playing'||mode==='paused'||mode==='loading')return;if(scoreSync.pending){await savePending();if(scoreSync.pending)return;}await signOutAccount();$('account-menu').hidden=true;renderAccount();});
+async function savePending(){try{await scoreSync.flush(getPlayer()?.uid);}catch{}}
+$('retry-save').addEventListener('click',savePending);window.addEventListener('online',savePending);
+async function start(){
  if(mode==='loading'||mode==='playing')return;
- const login=ranked&&!hasRankedSession()?loginNotoow():null;if(login)login.catch(()=>{});
- mode='loading';rankRun=null;await openAudio();$('start-status').textContent=ranked?'랭킹 연결 중…':'';
- $('start-btn').disabled=true;$('ranked-btn').disabled=true;
- if(ranked){try{rankRun=await (await loadRanking()).beginRun(await login);}catch(error){$('start-status').textContent=error.message==='LOGIN_CANCELLED'?'로그인 창을 닫았어요.':error.message==='POPUP_BLOCKED'?'팝업을 허용한 뒤 다시 눌러주세요.':'로그인 연결을 확인하고 다시 시도해 주세요.';mode='ready';$('start-btn').disabled=false;$('ranked-btn').disabled=false;return;}}
- rankedMode=ranked;
- $('ranked-btn').textContent=hasRankedSession()?'랭킹 도전':'Google 로그인 · 랭킹 도전';
- game=new Game(ranked?seasonRandom():Math.random);game.time=-BEAT*3;nextBeat=-6;flash=0;previous=clock();mode='playing';screens(null);canvas.focus({preventScroll:true});
- $('score-board').textContent='0';$('play-mode').textContent=rankRun?'랭킹 도전 · 100 BPM':'100 BPM';$('pause-btn').hidden=false;status('3');
- $('start-btn').disabled=false;$('ranked-btn').disabled=false;cancelAnimationFrame(raf);raf=requestAnimationFrame(loop);
+ const previousMode=mode;mode='loading';await openAudio();await accountReady;
+ $('start-btn').disabled=true;$('quick-retry').disabled=true;$('start-status').textContent='';
+ try{
+  if(accountError){await restoreAccount();accountError=false;}
+  const player=getPlayer();
+  if(player)await scoreSync.flush(player.uid);
+  rankRun=player?await beginRun():null;
+  game=new Game(seasonRandom());game.time=-BEAT*3;nextBeat=-6;flash=0;previous=clock();mode='playing';screens(null);canvas.focus({preventScroll:true});
+  $('score-board').textContent='0';$('play-mode').textContent='100 BPM';$('pause-btn').hidden=false;status('3');
+  $('account-menu').hidden=true;cancelAnimationFrame(raf);raf=requestAnimationFrame(loop);
+ }catch(error){mode=previousMode;$('start-status').textContent='연결 실패 · 다시 눌러주세요.';if(previousMode==='over')$('rank-message').textContent='저장 실패 · 다시 눌러주세요.';}
+ finally{$('start-btn').disabled=false;$('quick-retry').disabled=false;}
 }
 function sync(){const now=clock(),delta=Math.max(0,now-previous);previous=now;if(delta>.25){pause();return;}game.advance(delta);}
 function input(){
@@ -52,11 +86,11 @@ function input(){
 canvas.addEventListener('pointerdown',e=>{if(e.button!==0)return;e.preventDefault();input();});
 window.addEventListener('keydown',e=>{
  if(!['Space','KeyZ','KeyX'].includes(e.code)||e.repeat||e.target.closest('input,button,dialog'))return;
- e.preventDefault();if(mode==='ready'||mode==='over')start(hasRankedSession());else input();
+ e.preventDefault();if(mode==='ready'||mode==='over')start();else input();
 });
-$('start-btn').addEventListener('click',()=>start(hasRankedSession()));$('ranked-btn').addEventListener('click',()=>start(true));
+$('start-btn').addEventListener('click',start);$('ranked-btn').addEventListener('click',login);
 $('restart-btn').addEventListener('click',()=>{mode='ready';screens('start-screen');$('pause-btn').hidden=true;});
-$('quick-retry').addEventListener('click',()=>start(rankedMode));
+$('quick-retry').addEventListener('click',start);
 $('sound-btn').addEventListener('click',()=>{soundOn=!soundOn;$('sound-btn').setAttribute('aria-pressed',String(soundOn));$('sound-btn').textContent=soundOn?'사운드 켜짐':'사운드 꺼짐';});
 function pause(){if(mode!=='playing')return;mode='paused';cancelAnimationFrame(raf);screens('pause-screen');}
 $('pause-btn').addEventListener('click',pause);
@@ -74,9 +108,12 @@ function finish(){
  if(mode==='over')return;mode='over';cancelAnimationFrame(raf);if(audio)tone(90,audio.currentTime,.25,.07,'sawtooth');
  best=Math.max(best,game.score);try{localStorage.setItem('neon-v2-best',String(best));}catch{}
  $('best').textContent=best;$('final-score').textContent=game.score;$('accuracy').textContent=`PERFECT ${game.perfect} / ${game.score}`;
- $('pause-btn').hidden=true;screens('game-over-screen');$('submit-score').hidden=!rankRun||game.score<1;
- $('rank-message').textContent='';$('submit-btn').disabled=false;
- try{$('nickname').value=localStorage.getItem('neon-nickname')||'';}catch{}
+ $('pause-btn').hidden=true;screens('game-over-screen');$('rank-message').textContent='';$('retry-save').hidden=true;
+ const player=getPlayer();
+ if(rankRun&&player&&game.score>0){
+  scoreSync.record({run:rankRun,name:player.name,score:game.score,activeMs:Math.min(1200000,Math.round(game.time*1000))}).catch(()=>{});
+ }
+
 }
 function draw(){
  ctx.fillStyle='#090a14';ctx.fillRect(0,0,360,h);
@@ -96,15 +133,11 @@ function draw(){
 }
 async function showRanks(){
  if(!$('rank-dialog').open)$('rank-dialog').showModal();$('rank-status').textContent='불러오는 중…';$('rank-list').replaceChildren();$('rank-list').hidden=true;
- try{const rows=await (await loadRanking()).topScores();$('rank-status').textContent=rows.length?'':'첫 기록을 남겨보세요.';
+ try{const rows=await topScores();$('rank-status').textContent=rows.length?'':'첫 기록을 남겨보세요.';
  $('rank-list').hidden=rows.length===0;
- rows.forEach((row,index)=>{const li=document.createElement('li'),name=document.createElement('span'),score=document.createElement('b');name.textContent=`${index+1}. ${row.nickname}`;score.textContent=row.score;li.append(name,score);$('rank-list').append(li);});
+ rows.forEach((row,index)=>{const li=document.createElement('li'),name=document.createElement('span'),score=document.createElement('b');name.textContent=`${index+1}. ${identityHidden&&row.uid===getPlayer()?.uid?'플레이어':row.nickname}`;score.textContent=row.score;li.append(name,score);$('rank-list').append(li);});
  }catch{$('rank-status').textContent='랭킹을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.';}
 }
 document.querySelectorAll('[data-ranks]').forEach(el=>el.addEventListener('click',showRanks));$('close-ranks').addEventListener('click',()=>$('rank-dialog').close());$('refresh-ranks').addEventListener('click',showRanks);
-$('submit-score').addEventListener('submit',async e=>{e.preventDefault();if(!rankRun||$('submit-btn').disabled)return;const submittedRun=rankRun,submittedScore=game.score,submittedMs=Math.min(1200000,Math.round(game.time*1000)),nickname=$('nickname').value.trim();$('submit-btn').disabled=true;$('quick-retry').disabled=true;$('restart-btn').disabled=true;$('rank-message').textContent='기록 저장 중…';
- try{const saved=await (await loadRanking()).submitScore(submittedRun,nickname,submittedScore,submittedMs);$('rank-message').textContent=saved?'최고 기록을 저장했어요.':'기존 최고 기록이 더 높아요.';try{localStorage.setItem('neon-nickname',nickname);}catch{}rankRun=null;$('submit-score').hidden=true;await showRanks();}
- catch(error){console.warn('Rankings save:',error.code||error.message);$('rank-message').textContent='저장 실패 · 다시 눌러주세요.';$('submit-btn').disabled=false;}finally{$('quick-retry').disabled=false;$('restart-btn').disabled=false;}
-});
 window.addEventListener('resize',resize);resize();
 if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('./sw.js').catch(()=>{});
