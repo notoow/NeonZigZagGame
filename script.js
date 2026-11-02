@@ -1,353 +1,97 @@
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-const scoreElement = document.getElementById('score-board');
-const startScreen = document.getElementById('start-screen');
-const gameOverScreen = document.getElementById('game-over-screen');
-const finalScoreElement = document.getElementById('final-score');
-const restartBtn = document.getElementById('restart-btn');
-
-// Game State
-let isPlaying = false;
-let score = 0;
-let gameSpeed = 5;
-let frameCount = 0;
-
-// Dimensions
-let width, height;
-
-function resize() {
-    width = canvas.width = canvas.offsetWidth;
-    height = canvas.height = canvas.offsetHeight;
+import {Game,BEAT,seasonRandom} from './engine.js';
+const $=id=>document.getElementById(id),canvas=$('gameCanvas'),ctx=canvas.getContext('2d');
+let game=new Game(),mode='ready',previous=0,raf=0,scale=1,h=800,best=0,rankRun=null,rankingPromise;
+let audio,soundOn=true,nextBeat=0,flash=0,judgment='';
+try{best=Number(localStorage.getItem('neon-v2-best'))||0;}catch{}
+$('best').textContent=best;
+const clock=()=>audio?.state==='running'?audio.currentTime:performance.now()/1000;
+function resize(){const rect=canvas.getBoundingClientRect(),dpr=Math.min(devicePixelRatio||1,2);canvas.width=Math.round(rect.width*dpr);canvas.height=Math.round(rect.height*dpr);scale=rect.width/360;h=rect.height/scale;ctx.setTransform(dpr*scale,0,0,dpr*scale,0,0);draw();}
+function openAudio(){try{audio??=new (window.AudioContext||window.webkitAudioContext)();return audio.resume().catch(()=>{});}catch{return Promise.resolve();}}
+function tone(frequency,time,duration=.08,volume=.035,type='sine'){
+ if(!audio||!soundOn)return;
+ const osc=audio.createOscillator(),gain=audio.createGain();osc.type=type;osc.connect(gain);gain.connect(audio.destination);osc.frequency.value=frequency;gain.gain.setValueAtTime(volume,time);gain.gain.exponentialRampToValueAtTime(.001,time+duration);osc.start(time);osc.stop(time+duration);osc.onended=()=>{osc.disconnect();gain.disconnect();};
 }
-window.addEventListener('resize', resize);
-resize();
-
-// Game Objects
-const ball = {
-    x: 0,
-    y: 0,
-    radius: 8,
-    color: '#ff00ff',
-    dx: 0,
-    dy: 0,
-    speed: 5,
-    trail: []
-};
-
-let path = [];
-const pathWidth = 50;
-const segmentLength = 40; // Visual length of segment
-let cameraY = 0;
-
-// Audio
-const AudioContext = window.AudioContext || window.webkitAudioContext;
-const audioCtx = new AudioContext();
-
-function playSound(type) {
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-
-    const now = audioCtx.currentTime;
-
-    if (type === 'tap') {
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(600, now);
-        osc.frequency.exponentialRampToValueAtTime(300, now + 0.1);
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-        osc.start(now);
-        osc.stop(now + 0.1);
-    } else if (type === 'die') {
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(200, now);
-        osc.frequency.exponentialRampToValueAtTime(50, now + 0.5);
-        gain.gain.setValueAtTime(0.2, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
-        osc.start(now);
-        osc.stop(now + 0.5);
-    } else if (type === 'score') {
-        osc.type = 'square';
-        osc.frequency.setValueAtTime(800, now);
-        gain.gain.setValueAtTime(0.05, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-        osc.start(now);
-        osc.stop(now + 0.1);
-    }
+function music(){
+ if(!audio)return;
+ // Schedule ahead on the audio clock, not one sound per rendered frame.
+ while(nextBeat*BEAT/2 < game.time+.12){
+  const at=audio.currentTime+(nextBeat*BEAT/2-game.time);
+  if(at>=audio.currentTime){const beat=((nextBeat%8)+8)%8;tone(beat%2?1400:beat===0?100:180,at,beat%2?.025:.10,beat%2?.012:.04,beat%2?'triangle':'sine');if(beat===0&&game.time>=0)tone([110,130.81,146.83,130.81][Math.floor(nextBeat/8)%4],at,.22,.025,'triangle');}
+  nextBeat++;
+ }
 }
-
-// Path Generation Logic
-function generatePathSegment() {
-    let lastSegment;
-
-    if (path.length === 0) {
-        // Start platform - Start from bottom-leftish
-        lastSegment = {
-            x: width * 0.3, // Start at 30% width
-            y: height * 0.8, // Start at 80% height
-            width: pathWidth,
-            height: segmentLength,
-            direction: 'right' // Start moving Right (Diagonal Up-Right)
-        };
-        path.push(lastSegment);
-        return;
-    } else {
-        lastSegment = path[path.length - 1];
-    }
-
-    let direction = lastSegment.direction || 'right';
-
-    // Randomly switch direction, but less frequently to make it smoother
-    if (Math.random() < 0.15) {
-        direction = (direction === 'right') ? 'left' : 'right';
-    }
-
-    // BOUNDS CHECKING
-    // We need to look ahead. If we are too close to the edge, force a turn.
-    const margin = pathWidth * 1.5;
-    const step = segmentLength / 2;
-
-    // Predict next position based on current direction
-    let nextX = lastSegment.x + (direction === 'right' ? step : -step);
-
-    // If going Right would hit right wall, force Left
-    if (direction === 'right' && nextX > width - margin) {
-        direction = 'left';
-    }
-    // If going Left would hit left wall, force Right
-    else if (direction === 'left' && nextX < margin) {
-        direction = 'right';
-    }
-
-    // Calculate final new position
-    let newX = lastSegment.x;
-    let newY = lastSegment.y - step; // Always moving up
-
-    if (direction === 'right') {
-        newX += step;
-    } else {
-        newX -= step;
-    }
-
-    path.push({
-        x: newX,
-        y: newY,
-        width: pathWidth,
-        height: segmentLength,
-        direction: direction
-    });
+function screens(active){document.querySelectorAll('.screen').forEach(el=>el.hidden=el.id!==active);}
+function status(text){$('input-status').textContent=text;}
+async function loadRanking(){if(!rankingPromise)rankingPromise=import('./ranking.js').catch(error=>{rankingPromise=null;throw error;});return rankingPromise;}
+async function start(ranked=false){
+ if(mode==='loading'||mode==='playing')return;
+ mode='loading';rankRun=null;await openAudio();$('start-status').textContent=ranked?'랭킹 연결 중…':'';
+ $('start-btn').disabled=true;$('ranked-btn').disabled=true;
+ if(ranked){try{rankRun=await (await loadRanking()).beginRun();}catch{$('start-status').textContent='랭킹에 연결하지 못했어요. 바로 플레이는 가능합니다.';mode='ready';$('start-btn').disabled=false;$('ranked-btn').disabled=false;return;}}
+ game=new Game(ranked?seasonRandom():Math.random);game.time=-BEAT*3;nextBeat=-6;flash=0;previous=clock();mode='playing';screens(null);canvas.focus({preventScroll:true});
+ $('score-board').textContent='0';$('play-mode').textContent=rankRun?'랭킹 도전 · 100 BPM':'100 BPM';$('pause-btn').hidden=false;status('3');
+ $('start-btn').disabled=false;$('ranked-btn').disabled=false;cancelAnimationFrame(raf);raf=requestAnimationFrame(loop);
 }
-
-function initGame() {
-    score = 0;
-    scoreElement.innerText = score;
-    gameSpeed = 5;
-    cameraY = 0;
-
-    // Reset Path
-    path = [];
-
-    // 1. Create the first segment manually to set the start point
-    generatePathSegment(); // This creates the first block at width*0.3, height*0.8
-
-    // 2. Create a "Safe Zone" - a long diagonal straight path
-    // We force the direction to be 'right' for the first 15 segments
-    for (let i = 0; i < 15; i++) {
-        const last = path[path.length - 1];
-        const step = segmentLength / 2;
-        path.push({
-            x: last.x + step,
-            y: last.y - step,
-            width: pathWidth,
-            height: segmentLength,
-            direction: 'right'
-        });
-    }
-
-    // 3. Generate random path after the safe zone
-    for (let i = 0; i < 50; i++) {
-        generatePathSegment();
-    }
-
-    // 4. Place Ball on the start of the path
-    ball.x = path[0].x;
-    ball.y = path[0].y;
-
-    // Initial velocity must match the 'right' direction
-    ball.dx = ball.speed; // Moving Right
-    ball.dy = -ball.speed; // Moving Up
-
-    ball.trail = [];
+function sync(){const now=clock(),delta=Math.max(0,now-previous);previous=now;if(delta>.25){pause();return;}game.advance(delta);}
+function input(){
+ if(mode!=='playing')return;sync();if(mode!=='playing'||game.time<0)return;
+ const result=game.tap();
+ if(result==='perfect'||result==='good'){
+  judgment=result==='perfect'?'PERFECT':'GOOD';status(judgment);flash=1;
+  if(audio)tone(result==='perfect'?880:660,audio.currentTime,.065,.055,'triangle');
+  $('score-board').textContent=game.score;
+ }else if(result==='early')status('조금 빨라요');
+ if(!game.alive)finish();else draw();
 }
-
-function handleInput() {
-    if (!isPlaying) {
-        isPlaying = true;
-        startScreen.classList.remove('active');
-        gameOverScreen.classList.remove('active');
-        initGame();
-        loop();
-        playSound('tap');
-        return;
-    }
-
-    // Switch Direction
-    ball.dx = -ball.dx;
-    playSound('tap');
-}
-
-// Event Listeners
-window.addEventListener('mousedown', handleInput);
-window.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    handleInput();
-}, { passive: false });
-window.addEventListener('keydown', (e) => {
-    if (e.code === 'Space') handleInput();
+canvas.addEventListener('pointerdown',e=>{if(e.button!==0)return;e.preventDefault();input();});
+window.addEventListener('keydown',e=>{
+ if(!['Space','KeyZ','KeyX'].includes(e.code)||e.repeat||e.target.closest('input,button,dialog'))return;
+ e.preventDefault();if(mode==='ready'||mode==='over')start(false);else input();
 });
-
-restartBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    handleInput();
+$('start-btn').addEventListener('click',()=>start(false));$('ranked-btn').addEventListener('click',()=>start(true));
+$('restart-btn').addEventListener('click',()=>{mode='ready';screens('start-screen');$('pause-btn').hidden=true;});
+$('quick-retry').addEventListener('click',()=>start(false));
+$('sound-btn').addEventListener('click',()=>{soundOn=!soundOn;$('sound-btn').setAttribute('aria-pressed',String(soundOn));$('sound-btn').textContent=soundOn?'사운드 켜짐':'사운드 꺼짐';});
+function pause(){if(mode!=='playing')return;mode='paused';cancelAnimationFrame(raf);screens('pause-screen');}
+$('pause-btn').addEventListener('click',pause);
+$('resume-btn').addEventListener('click',async()=>{await openAudio();mode='playing';previous=clock();nextBeat=Math.ceil(game.time/(BEAT/2));screens(null);canvas.focus({preventScroll:true});raf=requestAnimationFrame(loop);});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});window.addEventListener('blur',pause);
+function loop(){
+ if(mode!=='playing')return;sync();if(mode!=='playing')return;
+ if(game.time<0)status(String(Math.ceil(-game.time/BEAT)));else if(game.time<.15)status('GO');
+ music();flash*=.88;$('score-board').textContent=game.score;
+ const beat=((Math.floor(game.time/BEAT)%4)+4)%4;
+ [...$('beat-meter').children].forEach((el,i)=>el.classList.toggle('on',i===beat));draw();
+ if(!game.alive){finish();return;}raf=requestAnimationFrame(loop);
+}
+function finish(){
+ if(mode==='over')return;mode='over';cancelAnimationFrame(raf);if(audio)tone(90,audio.currentTime,.25,.07,'sawtooth');
+ best=Math.max(best,game.score);try{localStorage.setItem('neon-v2-best',String(best));}catch{}
+ $('best').textContent=best;$('final-score').textContent=game.score;$('accuracy').textContent=`PERFECT ${game.perfect} / ${game.score}`;
+ $('pause-btn').hidden=true;screens('game-over-screen');$('submit-score').hidden=!rankRun||game.score<1;
+ $('rank-message').textContent=rankRun?'닉네임과 점수가 공개돼요.':'랭킹 도전으로 시작하면 기록을 올릴 수 있어요.';$('submit-btn').disabled=false;
+}
+function draw(){
+ ctx.fillStyle='#090a14';ctx.fillRect(0,0,360,h);
+ const camera=game.y-h*.70;ctx.save();ctx.translate(0,-camera);
+ const points=game.points;ctx.lineJoin='round';ctx.lineCap='round';ctx.beginPath();
+ points.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle='#00dce8';ctx.lineWidth=34;ctx.shadowColor='#00dce8';ctx.shadowBlur=10;ctx.stroke();ctx.shadowBlur=0;ctx.strokeStyle='#172232';ctx.lineWidth=31;ctx.stroke();
+ points.slice(game.index+1).forEach((p,i)=>{ctx.beginPath();ctx.arc(p.x,p.y,i===0?10:4,0,Math.PI*2);ctx.strokeStyle=i===0?'#ffdb79':'#426977';ctx.lineWidth=2;ctx.stroke();});
+ const corner=game.target,remaining=Math.max(0,game.remaining),approach=Math.min(1,remaining/BEAT);
+ ctx.beginPath();ctx.arc(corner.x,corner.y,10+approach*24,0,Math.PI*2);ctx.strokeStyle=remaining<.16?'#ffdb79':'#827c56';ctx.lineWidth=2;ctx.stroke();
+ ctx.shadowBlur=18;ctx.shadowColor='#ff4dd8';ctx.fillStyle='#ff4dd8';ctx.beginPath();ctx.arc(game.x,game.y,8,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;ctx.fillStyle='white';ctx.beginPath();ctx.arc(game.x-2,game.y-2,2.5,0,Math.PI*2);ctx.fill();
+ if(flash>.05){ctx.beginPath();ctx.arc(game.x,game.y,12+(1-flash)*24,0,Math.PI*2);ctx.strokeStyle=`rgba(255,220,120,${flash})`;ctx.stroke();}ctx.restore();
+}
+async function showRanks(){
+ if(!$('rank-dialog').open)$('rank-dialog').showModal();$('rank-status').textContent='불러오는 중…';$('rank-list').replaceChildren();
+ try{const rows=await (await loadRanking()).topScores();$('rank-status').textContent=rows.length?'리듬 모드 · 시즌 2':'첫 기록을 남겨보세요.';
+ rows.forEach((row,index)=>{const li=document.createElement('li'),name=document.createElement('span'),score=document.createElement('b');name.textContent=`${index+1}. ${row.nickname}`;score.textContent=row.score;li.append(name,score);$('rank-list').append(li);});
+ }catch{$('rank-status').textContent='랭킹을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.';}
+}
+document.querySelectorAll('[data-ranks]').forEach(el=>el.addEventListener('click',showRanks));$('close-ranks').addEventListener('click',()=>$('rank-dialog').close());$('refresh-ranks').addEventListener('click',showRanks);
+$('submit-score').addEventListener('submit',async e=>{e.preventDefault();if(!rankRun||$('submit-btn').disabled)return;const submittedRun=rankRun,submittedScore=game.score,submittedMs=Math.min(1200000,Math.round(game.time*1000)),nickname=$('nickname').value.trim();$('submit-btn').disabled=true;$('quick-retry').disabled=true;$('restart-btn').disabled=true;$('rank-message').textContent='기록 저장 중…';
+ try{const saved=await (await loadRanking()).submitScore(submittedRun,nickname,submittedScore,submittedMs);$('rank-message').textContent=saved?'최고 기록을 저장했어요.':'기존 최고 기록이 더 높아요.';rankRun=null;$('submit-score').hidden=true;}
+ catch{$('rank-message').textContent='저장하지 못했어요. 연결을 확인하고 다시 시도해 주세요.';$('submit-btn').disabled=false;}finally{$('quick-retry').disabled=false;$('restart-btn').disabled=false;}
 });
-
-function update() {
-    // Move Ball
-    ball.x += ball.dx;
-    ball.y += ball.dy;
-
-    // Camera Follow
-    const targetCamY = ball.y - height * 0.6;
-    cameraY += (targetCamY - cameraY) * 0.1;
-
-    // Trail
-    if (frameCount % 2 === 0) {
-        ball.trail.push({ x: ball.x, y: ball.y, alpha: 0.8 });
-    }
-    for (let i = ball.trail.length - 1; i >= 0; i--) {
-        ball.trail[i].alpha -= 0.05;
-        if (ball.trail[i].alpha <= 0) {
-            ball.trail.splice(i, 1);
-        }
-    }
-
-    // Collision Detection
-    let onPath = false;
-
-    // We can look at segments that are within vertical range of the ball
-    for (const seg of path) {
-        if (ball.y >= seg.y && ball.y <= seg.y + seg.height) {
-            // Check X overlap
-            const tolerance = ball.radius;
-            if (ball.x >= seg.x - seg.width / 2 - tolerance && ball.x <= seg.x + seg.width / 2 + tolerance) {
-                onPath = true;
-                break;
-            }
-        }
-    }
-
-    if (!onPath) {
-        gameOver();
-    }
-
-    // Score
-    // Score is based on distance traveled up
-    // Use the start Y of the path to calculate score
-    // The start Y is roughly height * 0.8
-    const startY = height * 0.8;
-    const currentScore = Math.floor((startY - ball.y) / 50);
-    if (currentScore > score) {
-        score = currentScore;
-        scoreElement.innerText = score;
-        if (score % 10 === 0) playSound('score');
-    }
-
-    // Infinite Path
-    if (path[path.length - 1].y > ball.y - height) {
-        generatePathSegment();
-    }
-
-    // Cleanup
-    if (path[0].y > ball.y + height) {
-        path.shift();
-    }
-
-    frameCount++;
-}
-
-function draw() {
-    ctx.fillStyle = '#0a0a12';
-    ctx.fillRect(0, 0, width, height);
-
-    ctx.save();
-    ctx.translate(0, -cameraY);
-
-    // Draw Path
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = 'rgba(0, 243, 255, 0.5)';
-
-    for (const seg of path) {
-        // Top face
-        ctx.fillStyle = '#1a1a2e';
-        ctx.fillRect(seg.x - seg.width / 2, seg.y, seg.width, seg.height);
-
-        // Borders
-        ctx.strokeStyle = '#00f3ff';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(seg.x - seg.width / 2, seg.y, seg.width, seg.height);
-    }
-
-    // Draw Trail
-    ctx.shadowBlur = 0;
-    for (const t of ball.trail) {
-        ctx.fillStyle = `rgba(255, 0, 255, ${t.alpha})`;
-        ctx.beginPath();
-        ctx.arc(t.x, t.y, ball.radius * 0.6, 0, Math.PI * 2);
-        ctx.fill();
-    }
-
-    // Draw Ball
-    ctx.shadowBlur = 20;
-    ctx.shadowColor = '#ff00ff';
-    ctx.fillStyle = '#ff00ff';
-    ctx.beginPath();
-    ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Inner light
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.arc(ball.x - 2, ball.y - 2, ball.radius * 0.3, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.restore();
-}
-
-function loop() {
-    if (!isPlaying) return;
-    update();
-    // Only draw and schedule next frame if still playing
-    if (isPlaying) {
-        draw();
-        requestAnimationFrame(loop);
-    }
-}
-
-function gameOver() {
-    isPlaying = false;
-    playSound('die');
-    finalScoreElement.innerText = `Score: ${score}`;
-    gameOverScreen.classList.add('active');
-}
-
-// Prevent double input on desktop (mousedown on button bubbling to window)
-restartBtn.addEventListener('mousedown', (e) => {
-    e.stopPropagation();
-});
-
-// Init
-resize();
-initGame();
-draw();
+window.addEventListener('resize',resize);resize();
+if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('./sw.js').catch(()=>{});
