@@ -1,17 +1,18 @@
 import {backend} from './firebase-config.js';
 let connection,appCheck;
-const deadline=(promise,ms=12000)=>{let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Connection timeout')),ms);})]).finally(()=>clearTimeout(timer));};
+const deadline=(promise,ms=30000)=>{let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Connection timeout')),ms);})]).finally(()=>clearTimeout(timer));};
 async function connect(){
  if(!backend.enabled)throw new Error('Rankings not configured');
  if(!connection)connection=(async()=>{
   const [appSDK,authSDK,dbSDK,checkSDK]=await Promise.all(['app','auth','firestore','app-check'].map(name=>import(`https://www.gstatic.com/firebasejs/13.1.0/firebase-${name}.js`)));
+  console.info('Rankings: SDK loaded');
   const app=appSDK.getApps().find(app=>app.name==='neon-zigzag')||appSDK.initializeApp(backend.firebase,'neon-zigzag');
   const check=appCheck??=checkSDK.initializeAppCheck(app,{provider:new checkSDK.ReCaptchaEnterpriseProvider(backend.appCheckSiteKey),isTokenAutoRefreshEnabled:true});
-  await checkSDK.getToken(check);
-  const auth=authSDK.getAuth(app);await auth.authStateReady();
+  await deadline(checkSDK.getToken(check));console.info('Rankings: App Check ready');
+  const auth=authSDK.getAuth(app);await deadline(auth.authStateReady());console.info('Rankings: auth ready');
   return {auth,authSDK,db:dbSDK.getFirestore(app),sdk:dbSDK};
  })().catch(error=>{connection=null;throw error;});
- return deadline(connection);
+ return deadline(connection).catch(error=>{console.warn('Rankings connection:',error.code||error.message);throw error;});
 }
 const base=`sites/${backend.siteId}`;
 export async function beginRun(){
