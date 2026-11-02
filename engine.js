@@ -1,4 +1,4 @@
-export function seasonRandom(){let seed=20261102;return ()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};}
+export function seasonRandom(seed=20261102){return ()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};}
 export const RULESET='v2';
 export const BEAT=.6; // 100 BPM; the shortest turn is an eighth note (300 ms).
 export const EARLY=.16, LATE=.12, PERFECT=.045;

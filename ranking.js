@@ -1,5 +1,6 @@
 import {backend} from './firebase-config.js';
 import {rankingStore} from './ranking-store.js';
+import {LiveRun} from './live-run.js';
 let connection,appCheck,player=null;
 const listeners=new Set();
 export const getPlayer=()=>player;
@@ -15,7 +16,7 @@ async function connect(){
   appCheck??=checkSDK.initializeAppCheck(app,{provider:new checkSDK.ReCaptchaEnterpriseProvider(backend.appCheckSiteKey),isTokenAutoRefreshEnabled:true});
   const auth=authSDK.getAuth(app);await deadline(auth.authStateReady());
   await authSDK.setPersistence(auth,authSDK.browserLocalPersistence);
-  const context={auth,authSDK,db:sdk.getFirestore(app),sdk};
+  const context={auth,authSDK,checkSDK,db:sdk.getFirestore(app),sdk};
   return {...context,store:rankingStore(context,`sites/${backend.siteId}`,backend.season)};
  })().catch(error=>{connection=null;throw error;});
  return deadline(connection);
@@ -33,6 +34,16 @@ export async function signInAccount(customToken){
  const account=await readPlayer(auth);if(!account)throw new Error('NOTOOW_LOGIN_REQUIRED');return account;
 }
 export async function signOutAccount(){const {auth,authSDK}=await connect();await authSDK.signOut(auth);setPlayer(null);}
-export async function beginRun(){const {auth,store}=await connect();if(!await readPlayer(auth))throw new Error('NOTOOW_LOGIN_REQUIRED');return deadline(store.beginRun());}
+export async function rankedRequest(body){
+ const {auth,checkSDK}=await connect();if(!auth.currentUser)throw new Error('NOTOOW_LOGIN_REQUIRED');
+ const [token,check]=await Promise.all([auth.currentUser.getIdToken(),checkSDK.getToken(appCheck)]);
+ const response=await fetch(backend.rankedEndpoint,{method:'POST',headers:{Authorization:`Bearer ${token}`,'X-Firebase-AppCheck':check.token,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(12000)});
+ const data=await response.json();if(!response.ok){const error=new Error(data.error||'CONNECTION');error.code=data.error;throw error;}return data;
+}
+export async function beginRun(){const {auth}=await connect();if(!await readPlayer(auth))throw new Error('NOTOOW_LOGIN_REQUIRED');return {uid:auth.currentUser.uid,protocol:3,...await rankedRequest({op:'start',startId:crypto.randomUUID()})};}
 export async function topScores(){return deadline((await connect()).store.topScores());}
-export async function submitScore(run,nickname,score,activeMs){return deadline((await connect()).store.submitScore(run,nickname,score,activeMs));}
+export async function submitScore(run,_name,_score,_activeMs,onProgress){
+ if(run.protocol!==3){const error=new Error('LEGACY_RUN');error.code='LEGACY_RUN';throw error;}
+ if((await connect()).auth.currentUser?.uid!==run.uid)throw new Error('Player changed');
+ return new LiveRun(run,rankedRequest,onProgress).flush();
+}

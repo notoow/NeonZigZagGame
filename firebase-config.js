@@ -1,7 +1,8 @@
 export const backend={
   "enabled": true,
   "siteId": "neon-zigzag",
-  "season": "v2",
+  "season": "v3",
+  "rankedEndpoint": "https://xbwnfycdpawmwvqeojkn.supabase.co/functions/v1/neon-ranked",
   "firebase": {
     "projectId": "mini-sites-hub",
     "appId": "1:118272458664:web:6a705f2029bd3932a9679d",

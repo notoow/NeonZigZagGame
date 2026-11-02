@@ -1,9 +1,11 @@
-import {getPlayer,onPlayerChange,restoreAccount,signInAccount,signOutAccount,beginRun,submitScore,topScores} from './ranking.js?v=5';
+import {LiveRun} from './live-run.js';
+import {getPlayer,onPlayerChange,restoreAccount,signInAccount,signOutAccount,beginRun,submitScore,topScores,rankedRequest} from './ranking.js?v=6';
 import {ScoreSync} from './score-sync.js';
 import {loginNotoow} from './notoow-login.js';
 import {Game,BEAT,seasonRandom} from './engine.js';
 const $=id=>document.getElementById(id),canvas=$('gameCanvas'),ctx=canvas.getContext('2d');
 let game=new Game(),mode='ready',previous=0,raf=0,scale=1,h=800,best=0,rankRun=null,identityHidden=false,accountLoading=true;
+let liveRun=null,lastCheckpoint=0,resumeQueued=false;
 let audio,soundOn=true,nextBeat=0,flash=0,judgment='';
 try{best=Number(localStorage.getItem('neon-v2-best'))||0;}catch{}
 $('best').textContent=best;
@@ -28,7 +30,7 @@ function screens(active){document.querySelectorAll('.screen').forEach(el=>el.hid
 function status(text){$('input-status').textContent=text;}
 let storage;try{storage=localStorage;identityHidden=storage.getItem('neon-hide-name')==='1';}catch{}
 const scoreSync=new ScoreSync({submit:submitScore,storage,onState:state=>{
- $('rank-message').textContent=state==='saving'?'저장 중…':state==='saved'?'저장됨':'저장 실패';
+ $('rank-message').textContent=state==='saving'?'저장 중…':state==='saved'?'저장됨':state==='expired'?'기록 만료':'저장 실패';
  $('retry-save').hidden=state!=='error';
  $('quick-retry').disabled=state==='saving';
  if(state==='saved'&&$('rank-dialog').open)showRanks();
@@ -66,7 +68,8 @@ async function start(){
   const player=getPlayer();
   if(player)await scoreSync.flush(player.uid);
   rankRun=player?await beginRun():null;
-  game=new Game(seasonRandom());game.time=-BEAT*3;nextBeat=-6;flash=0;previous=clock();mode='playing';screens(null);canvas.focus({preventScroll:true});
+  liveRun=rankRun?new LiveRun(rankRun,rankedRequest):null;lastCheckpoint=performance.now();
+  game=new Game(seasonRandom(rankRun?.seed));game.time=-BEAT*3;nextBeat=-6;flash=0;previous=clock();mode='playing';screens(null);canvas.focus({preventScroll:true});
   $('score-board').textContent='0';$('play-mode').textContent='100 BPM';$('pause-btn').hidden=false;status('3');
   $('account-menu').hidden=true;cancelAnimationFrame(raf);raf=requestAnimationFrame(loop);
  }catch(error){mode=previousMode;$('start-status').textContent='연결 실패 · 다시 눌러주세요.';if(previousMode==='over')$('rank-message').textContent='저장 실패 · 다시 눌러주세요.';}
@@ -75,6 +78,7 @@ async function start(){
 function sync(){const now=clock(),delta=Math.max(0,now-previous);previous=now;if(delta>.25){pause();return;}game.advance(delta);}
 function input(){
  if(mode!=='playing')return;sync();if(mode!=='playing'||game.time<0)return;
+ if(game.alive)liveRun?.input(game.time);
  const result=game.tap();
  if(result==='perfect'||result==='good'){
   judgment=result==='perfect'?'PERFECT':'GOOD';status(judgment);flash=1;
@@ -89,12 +93,13 @@ window.addEventListener('keydown',e=>{
  e.preventDefault();if(mode==='ready'||mode==='over')start();else input();
 });
 $('start-btn').addEventListener('click',start);$('ranked-btn').addEventListener('click',login);
+$('pause-menu').addEventListener('click',()=>{mode='ready';liveRun=null;rankRun=null;screens('start-screen');$('pause-btn').hidden=true;});
 $('restart-btn').addEventListener('click',()=>{mode='ready';screens('start-screen');$('pause-btn').hidden=true;});
 $('quick-retry').addEventListener('click',start);
 $('sound-btn').addEventListener('click',()=>{soundOn=!soundOn;$('sound-btn').setAttribute('aria-pressed',String(soundOn));$('sound-btn').textContent=soundOn?'사운드 켜짐':'사운드 꺼짐';});
-function pause(){if(mode!=='playing')return;mode='paused';cancelAnimationFrame(raf);screens('pause-screen');}
+function pause(){if(mode!=='playing')return;mode='paused';resumeQueued=false;cancelAnimationFrame(raf);screens('pause-screen');if(liveRun){liveRun.enqueue('pause',game.time);liveRun.flush().catch(()=>{status('연결 확인');});}}
 $('pause-btn').addEventListener('click',pause);
-$('resume-btn').addEventListener('click',async()=>{await openAudio();mode='playing';previous=clock();nextBeat=Math.ceil(game.time/(BEAT/2));screens(null);canvas.focus({preventScroll:true});raf=requestAnimationFrame(loop);});
+$('resume-btn').addEventListener('click',async()=>{if(mode!=='paused')return;$('resume-btn').disabled=true;try{if(liveRun){await liveRun.flush();if(!resumeQueued){liveRun.enqueue('resume',game.time);resumeQueued=true;}await liveRun.flush();}await openAudio();mode='playing';previous=clock();lastCheckpoint=performance.now();nextBeat=Math.ceil(game.time/(BEAT/2));screens(null);canvas.focus({preventScroll:true});raf=requestAnimationFrame(loop);}catch{status('연결 확인 · 다시 눌러주세요.');}finally{$('resume-btn').disabled=false;}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});window.addEventListener('blur',pause);
 function loop(){
  if(mode!=='playing')return;sync();if(mode!=='playing')return;
@@ -102,7 +107,9 @@ function loop(){
  music();flash*=.88;$('score-board').textContent=game.score;
  const beat=((Math.floor(game.time/BEAT)%4)+4)%4;
  [...$('beat-meter').children].forEach((el,i)=>el.classList.toggle('on',i===beat));draw();
- if(!game.alive){finish();return;}raf=requestAnimationFrame(loop);
+ if(!game.alive){finish();return;}
+ if(liveRun&&performance.now()-lastCheckpoint>=2000){lastCheckpoint=performance.now();const current=liveRun;current.enqueue('tick',game.time);current.flush().catch(()=>{if(liveRun===current)pause();});}
+ raf=requestAnimationFrame(loop);
 }
 function finish(){
  if(mode==='over')return;mode='over';cancelAnimationFrame(raf);if(audio)tone(90,audio.currentTime,.25,.07,'sawtooth');
@@ -110,8 +117,9 @@ function finish(){
  $('best').textContent=best;$('final-score').textContent=game.score;$('accuracy').textContent=`PERFECT ${game.perfect} / ${game.score}`;
  $('pause-btn').hidden=true;screens('game-over-screen');$('rank-message').textContent='';$('retry-save').hidden=true;
  const player=getPlayer();
- if(rankRun&&player&&game.score>0){
-  scoreSync.record({run:rankRun,name:player.name,score:game.score,activeMs:Math.min(1200000,Math.round(game.time*1000))}).catch(()=>{});
+ if(liveRun&&rankRun&&player){
+  liveRun.enqueue('finish',game.time);
+  scoreSync.record({run:liveRun.seal(),name:player.name,score:game.score,activeMs:Math.min(1200000,Math.round(game.time*1000))}).catch(()=>{});
  }
 
 }
