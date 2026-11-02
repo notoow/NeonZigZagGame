@@ -1,6 +1,6 @@
 export function loginNotoow(){
  const nonce=crypto.randomUUID();
- const popup=window.open('about:blank','notoow-game-login','popup,width=480,height=680');
+ const popup=window.open('about:blank','notoow-game-login-'+nonce);
  if(!popup)return Promise.reject(new Error('POPUP_BLOCKED'));
  return new Promise((resolve,reject)=>{
   let settled=false;
