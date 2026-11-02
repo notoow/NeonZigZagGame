@@ -23,9 +23,9 @@ export class Game {
  }
  tap(){
   if(!this.alive)return 'stopped';
-  if(this.accepted)return 'duplicate';
+  if(this.accepted){this.alive=false;return this.lastJudgment='extra';}
   const error=this.time-this.target.t;
-  if(error < -EARLY-1e-9)return this.lastJudgment='early';
+  if(error < -EARLY-1e-9){this.alive=false;return this.lastJudgment='early';}
   if(error > LATE+1e-9){this.alive=false;return this.lastJudgment='miss';}
   this.accepted=true;this.score++;
   const judgment=Math.abs(error)<=PERFECT+1e-9?'perfect':'good';

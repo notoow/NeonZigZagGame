@@ -4,7 +4,7 @@ One-button, 100 BPM rhythm zigzag. Run locally with `python -m http.server 18802
 
 ## Input and timing
 
-Pointer events avoid duplicate touch/mouse turns. Space/Z/X ignore keyboard auto-repeat. Each corner accepts one input; extra taps cannot undo it. Movement and judgment use elapsed seconds rather than rendered frames. Shortest turns take 300 ms; early buffer 160 ms, late grace 120 ms, PERFECT within 45 ms. Ranked runs use the same seeded chart. Backgrounding pauses the run.
+Pointer events avoid duplicate touch/mouse turns. Space/Z/X ignore keyboard auto-repeat. Each corner accepts one input; extra taps and premature inputs end the run, preventing Z/X spam. Movement and judgment use elapsed seconds rather than rendered frames. Shortest turns take 300 ms; early buffer 160 ms, late grace 120 ms, PERFECT within 45 ms. Ranked runs use the same seeded chart. Backgrounding pauses the run.
 
 Synthesized original percussion and bass share the AudioContext clock with gameplay. No borrowed music or proprietary source code.
 
@@ -16,6 +16,6 @@ Synthesized original percussion and bass share the AudioContext clock with gamep
 
 ## Ranking
 
-Shared Firebase project `mini-sites-hub`, dedicated Neon web app, App Check Enterprise and verified notoow Google accounts. Data lives under `sites/neon-zigzag`, season `v2`. Public top 20, one best score per notoow account. Run start and best-score submission are atomic and constrained by Firestore rules, elapsed time, ownership and single-use run IDs. This is a casual leaderboard, not authoritative anti-cheat: a static client cannot prove gameplay without server replay validation. Ranked starts open notoow.com to verify its Google session, then exchange a short-lived custom token for in-memory Firebase authentication. Anonymous score writes are rejected by server rules.
+Shared Firebase project `mini-sites-hub`, dedicated Neon web app, App Check Enterprise and verified notoow Google accounts. Data lives under `sites/neon-zigzag`, season `v2`. Public top 20, one best score per notoow account. Run start and best-score submission are atomic and constrained by Firestore rules, elapsed time, ownership and single-use run IDs. This is a casual leaderboard, not authoritative anti-cheat: a static client cannot prove gameplay without server replay validation. The first ranked start opens notoow.com to verify its Google session, then exchanges a short-lived custom token for in-memory Firebase authentication. Retries keep that ranked session and create a fresh run; successful score submissions open the updated leaderboard. Anonymous score writes are rejected by server rules.
 
 Backend rules and emulator tests: `E:/@E-programming/261022 kyungju/mini-sites-hub`. Existing site rules are preserved. No paid backend service added.

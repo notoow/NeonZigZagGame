@@ -13,14 +13,21 @@ test('10,000 generated turns remain in bounds with at least 300ms between hits',
  }
  assert.equal(game.score,10000);assert.ok(game.points.length<60);
 });
-test('two rapid inputs cannot undo an already registered turn',()=>{
+test('extra input after a registered corner fails instead of enabling spam',()=>{
  const game=new Game();game.advance(BEAT-.08);
- assert.equal(game.tap(),'good');assert.equal(game.tap(),'duplicate');
- game.advance(.08);assert.equal(game.score,1);assert.equal(game.direction,-1);assert.equal(game.alive,true);
+ assert.equal(game.tap(),'good');assert.equal(game.tap(),'extra');
+ assert.equal(game.score,1);assert.equal(game.alive,false);
+});
+test('continuous Z/X-style tapping cannot survive, even when the first input is valid',()=>{
+ for(const interval of [.001,.01,.03,.06,.1])for(const first of [0,BEAT-.08,BEAT]){
+  const g=new Game();g.advance(first);g.tap();
+  for(let i=0;i<50&&g.alive;i++){g.advance(interval);g.tap();}
+  assert.equal(g.alive,false);assert.ok(g.score<=1);
+ }
 });
 test('early buffer and late grace are measured in time, not rendered frames',()=>{
  for(const offset of [-EARLY,0,LATE]){const g=new Game();g.advance(BEAT+offset);assert.ok(['good','perfect'].includes(g.tap()));assert.equal(g.score,1);}
- const early=new Game();early.advance(BEAT-EARLY-.001);assert.equal(early.tap(),'early');assert.equal(early.score,0);
+ const early=new Game();early.advance(BEAT-EARLY-.001);assert.equal(early.tap(),'early');assert.equal(early.score,0);assert.equal(early.alive,false);
  const missed=new Game();missed.advance(BEAT+LATE+.001);assert.equal(missed.alive,false);
 });
 test('the same timestamped inputs produce the same game at 30, 60, 144 and 240Hz',()=>{

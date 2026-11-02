@@ -1,5 +1,6 @@
 import {backend} from './firebase-config.js';
-let connection,appCheck;
+let connection,appCheck,verifiedUid=null;
+export const hasRankedSession=()=>verifiedUid!==null;
 const deadline=(promise,ms=30000)=>{let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Connection timeout')),ms);})]).finally(()=>clearTimeout(timer));};
 async function connect(){
  if(!backend.enabled)throw new Error('Rankings not configured');
@@ -17,11 +18,14 @@ async function connect(){
 const base=`sites/${backend.siteId}`;
 export async function beginRun(customToken){
  const {auth,authSDK,db,sdk}=await connect();
- if(!customToken)throw new Error('NOTOOW_LOGIN_REQUIRED');
- await deadline(authSDK.setPersistence(auth,authSDK.inMemoryPersistence));
- await deadline(authSDK.signInWithCustomToken(auth,customToken));
+ if(customToken){
+  verifiedUid=null;
+  await deadline(authSDK.setPersistence(auth,authSDK.inMemoryPersistence));
+  await deadline(authSDK.signInWithCustomToken(auth,customToken));
+ }else if(!verifiedUid||auth.currentUser?.uid!==verifiedUid)throw new Error('NOTOOW_LOGIN_REQUIRED');
  const claims=await auth.currentUser.getIdTokenResult();
- if(claims.claims.notoow_account!==true)throw new Error('NOTOOW_LOGIN_REQUIRED');
+ if(claims.claims.notoow_account!==true){verifiedUid=null;throw new Error('NOTOOW_LOGIN_REQUIRED');}
+ verifiedUid=auth.currentUser.uid;
  const uid=auth.currentUser.uid,runId=crypto.randomUUID();
  await deadline(sdk.setDoc(sdk.doc(db,`${base}/runs/${uid}`),{runId,season:backend.season,startedAt:sdk.serverTimestamp(),used:false}));
  return {uid,runId};

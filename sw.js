@@ -1,4 +1,4 @@
-const CACHE='neon-zigzag-v3';
+const CACHE='neon-zigzag-v4';
 const ASSETS=['./','./index.html','./style.css?v=2','./script.js?v=2','./engine.js','./ranking.js','./firebase-config.js','./manifest.json','./icon.svg','./notoow-2d.png','./notoow-login.js'];
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting()));});
 self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key==='zigzag-v1'||key.startsWith('neon-zigzag-')&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim()));});
