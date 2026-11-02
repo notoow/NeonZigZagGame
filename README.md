@@ -16,6 +16,6 @@ Synthesized original percussion and bass share the AudioContext clock with gamep
 
 ## Ranking
 
-Shared Firebase project `mini-sites-hub`, dedicated Neon web app, App Check Enterprise and anonymous Auth. Data lives under `sites/neon-zigzag`, season `v2`. Public top 20, one best score per browser identity. Run start and best-score submission are atomic and constrained by Firestore rules, elapsed time, ownership and single-use run IDs. This is a casual leaderboard, not authoritative anti-cheat: a static client cannot prove gameplay without server replay validation. Clearing browser data creates a new identity.
+Shared Firebase project `mini-sites-hub`, dedicated Neon web app, App Check Enterprise and verified notoow Google accounts. Data lives under `sites/neon-zigzag`, season `v2`. Public top 20, one best score per notoow account. Run start and best-score submission are atomic and constrained by Firestore rules, elapsed time, ownership and single-use run IDs. This is a casual leaderboard, not authoritative anti-cheat: a static client cannot prove gameplay without server replay validation. Ranked starts open notoow.com to verify its Google session, then exchange a short-lived custom token for in-memory Firebase authentication. Anonymous score writes are rejected by server rules.
 
 Backend rules and emulator tests: `E:/@E-programming/261022 kyungju/mini-sites-hub`. Existing site rules are preserved. No paid backend service added.

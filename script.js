@@ -1,9 +1,11 @@
+import {loginNotoow} from './notoow-login.js';
 import {Game,BEAT,seasonRandom} from './engine.js';
 const $=id=>document.getElementById(id),canvas=$('gameCanvas'),ctx=canvas.getContext('2d');
 let game=new Game(),mode='ready',previous=0,raf=0,scale=1,h=800,best=0,rankRun=null,rankingPromise;
 let audio,soundOn=true,nextBeat=0,flash=0,judgment='';
 try{best=Number(localStorage.getItem('neon-v2-best'))||0;}catch{}
 $('best').textContent=best;
+const logo=new Image();logo.src='./notoow-2d.png';logo.onload=()=>draw();
 const clock=()=>audio?.state==='running'?audio.currentTime:performance.now()/1000;
 function resize(){const rect=canvas.getBoundingClientRect(),dpr=Math.min(devicePixelRatio||1,2);canvas.width=Math.round(rect.width*dpr);canvas.height=Math.round(rect.height*dpr);scale=rect.width/360;h=rect.height/scale;ctx.setTransform(dpr*scale,0,0,dpr*scale,0,0);draw();}
 function openAudio(){try{audio??=new (window.AudioContext||window.webkitAudioContext)();return audio.resume().catch(()=>{});}catch{return Promise.resolve();}}
@@ -25,9 +27,10 @@ function status(text){$('input-status').textContent=text;}
 async function loadRanking(){if(!rankingPromise)rankingPromise=import('./ranking.js').catch(error=>{rankingPromise=null;throw error;});return rankingPromise;}
 async function start(ranked=false){
  if(mode==='loading'||mode==='playing')return;
+ const login=ranked?loginNotoow():null;if(login)login.catch(()=>{});
  mode='loading';rankRun=null;await openAudio();$('start-status').textContent=ranked?'랭킹 연결 중…':'';
  $('start-btn').disabled=true;$('ranked-btn').disabled=true;
- if(ranked){try{rankRun=await (await loadRanking()).beginRun();}catch{$('start-status').textContent='랭킹에 연결하지 못했어요. 바로 플레이는 가능합니다.';mode='ready';$('start-btn').disabled=false;$('ranked-btn').disabled=false;return;}}
+ if(ranked){try{rankRun=await (await loadRanking()).beginRun(await login);}catch(error){$('start-status').textContent=error.message==='LOGIN_CANCELLED'?'로그인 창을 닫았어요.':error.message==='POPUP_BLOCKED'?'팝업을 허용한 뒤 다시 눌러주세요.':'로그인 연결을 확인하고 다시 시도해 주세요.';mode='ready';$('start-btn').disabled=false;$('ranked-btn').disabled=false;return;}}
  game=new Game(ranked?seasonRandom():Math.random);game.time=-BEAT*3;nextBeat=-6;flash=0;previous=clock();mode='playing';screens(null);canvas.focus({preventScroll:true});
  $('score-board').textContent='0';$('play-mode').textContent=rankRun?'랭킹 도전 · 100 BPM':'100 BPM';$('pause-btn').hidden=false;status('3');
  $('start-btn').disabled=false;$('ranked-btn').disabled=false;cancelAnimationFrame(raf);raf=requestAnimationFrame(loop);
@@ -79,7 +82,12 @@ function draw(){
  points.slice(game.index+1).forEach((p,i)=>{ctx.beginPath();ctx.arc(p.x,p.y,i===0?10:4,0,Math.PI*2);ctx.strokeStyle=i===0?'#ffdb79':'#426977';ctx.lineWidth=2;ctx.stroke();});
  const corner=game.target,remaining=Math.max(0,game.remaining),approach=Math.min(1,remaining/BEAT);
  ctx.beginPath();ctx.arc(corner.x,corner.y,10+approach*24,0,Math.PI*2);ctx.strokeStyle=remaining<.16?'#ffdb79':'#827c56';ctx.lineWidth=2;ctx.stroke();
- ctx.shadowBlur=18;ctx.shadowColor='#ff4dd8';ctx.fillStyle='#ff4dd8';ctx.beginPath();ctx.arc(game.x,game.y,8,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;ctx.fillStyle='white';ctx.beginPath();ctx.arc(game.x-2,game.y-2,2.5,0,Math.PI*2);ctx.fill();
+ ctx.save();ctx.translate(game.x,game.y);
+ const surface=ctx.createRadialGradient(-4,-5,1,0,0,13);surface.addColorStop(0,'#ffe0b7');surface.addColorStop(.4,'#f8a77b');surface.addColorStop(1,'#b53e27');
+ ctx.shadowBlur=16;ctx.shadowColor='#e85d3b';ctx.fillStyle=surface;ctx.beginPath();ctx.arc(0,0,12,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
+ ctx.strokeStyle='#ffceab';ctx.lineWidth=.8;ctx.stroke();
+ if(logo.complete&&logo.naturalWidth){ctx.globalAlpha=.92;ctx.drawImage(logo,-8,-8,16,16);ctx.globalAlpha=1;}
+ ctx.strokeStyle='rgba(255,239,215,.55)';ctx.lineWidth=.9;ctx.beginPath();ctx.arc(-1,-1,9,Math.PI*1.12,Math.PI*1.6);ctx.stroke();ctx.restore();
  if(flash>.05){ctx.beginPath();ctx.arc(game.x,game.y,12+(1-flash)*24,0,Math.PI*2);ctx.strokeStyle=`rgba(255,220,120,${flash})`;ctx.stroke();}ctx.restore();
 }
 async function showRanks(){

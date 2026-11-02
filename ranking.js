@@ -15,9 +15,13 @@ async function connect(){
  return deadline(connection).catch(error=>{console.warn('Rankings connection:',error.code||error.message);throw error;});
 }
 const base=`sites/${backend.siteId}`;
-export async function beginRun(){
+export async function beginRun(customToken){
  const {auth,authSDK,db,sdk}=await connect();
- if(!auth.currentUser)await deadline(authSDK.signInAnonymously(auth));
+ if(!customToken)throw new Error('NOTOOW_LOGIN_REQUIRED');
+ await deadline(authSDK.setPersistence(auth,authSDK.inMemoryPersistence));
+ await deadline(authSDK.signInWithCustomToken(auth,customToken));
+ const claims=await auth.currentUser.getIdTokenResult();
+ if(claims.claims.notoow_account!==true)throw new Error('NOTOOW_LOGIN_REQUIRED');
  const uid=auth.currentUser.uid,runId=crypto.randomUUID();
  await deadline(sdk.setDoc(sdk.doc(db,`${base}/runs/${uid}`),{runId,season:backend.season,startedAt:sdk.serverTimestamp(),used:false}));
  return {uid,runId};
